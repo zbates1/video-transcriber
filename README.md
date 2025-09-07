@@ -9,13 +9,17 @@ Convert MP4 videos to text transcriptions with optional AI-generated summaries u
 1. **Python 3.8+**
 2. **FFmpeg** - Required for audio extraction
    - **Windows**: Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)
+   - **Windows (recommended)**: 
+   ```bash
+   winget install ffmpeg
+   ```
    - **macOS**: `brew install ffmpeg`
    - **Linux**: `sudo apt install ffmpeg`
 
 ### Install Dependencies
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/zbates1/video-transcriber.git
 cd video_transcriber
 pip install -r requirements.txt
 ```
@@ -30,7 +34,7 @@ python src/main.py path/to/video.mp4
 
 ### With AI Summary (Requires OpenAI API Key)
 
-Set your API key:
+Set your API key (**recommended to setup OPENAI_API_KEY in *.env* file in root**):
 ```bash
 export OPENAI_API_KEY="your-api-key-here"
 ```
