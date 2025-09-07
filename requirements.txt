@@ -1,0 +1,40 @@
+# Video Transcriber - Python Dependencies
+# 
+# This file contains all necessary dependencies for the video transcription pipeline
+# Install with: pip install -r requirements.txt
+
+# Core speech recognition functionality
+SpeechRecognition>=3.10.0
+# Required for SpeechRecognition to work with various audio formats
+PyAudio>=0.2.11
+
+# HTTP requests for ChatGPT API integration
+requests>=2.31.0
+
+# Environment variable management from .env files
+python-dotenv>=1.0.0
+
+# Audio processing (optional, for better audio format support)
+pydub>=0.25.1
+
+# Testing dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+
+# Development dependencies (optional)
+# Uncomment if needed for development
+# black>=23.0.0
+# flake8>=6.0.0
+# mypy>=1.5.0
+
+# System requirements (install separately):
+# - FFmpeg (for audio extraction from video files)
+#   Windows: Download from https://ffmpeg.org/download.html
+#   macOS: brew install ffmpeg  
+#   Ubuntu/Debian: sudo apt-get install ffmpeg
+#   CentOS/RHEL: sudo yum install ffmpeg
+
+# Optional audio format support libraries:
+# - For MP3 support: install ffmpeg
+# - For additional audio codecs: install appropriate system libraries
