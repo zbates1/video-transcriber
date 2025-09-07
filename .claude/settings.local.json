@@ -14,7 +14,10 @@
       "Bash(python -m pytest tests/unit/services/ -v)",
       "Bash(python -m pytest tests/unit/test_error_handling.py -v)",
       "Bash(python -m pytest tests/integration/test_full_pipeline.py -v)",
-      "Bash(python -m pytest tests/integration/test_full_pipeline.py::TestFullPipeline::test_full_pipeline_with_summary -v)"
+      "Bash(python -m pytest tests/integration/test_full_pipeline.py::TestFullPipeline::test_full_pipeline_with_summary -v)",
+      "Bash(ffmpeg:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "ask": []

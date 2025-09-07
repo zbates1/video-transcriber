@@ -1,12 +1,17 @@
 """
-Transcriber service for converting audio files to text using speech recognition.
+Transcriber service for converting audio files to text using OpenAI Whisper.
 """
 
 import os
+import sys
 from typing import Optional
-import speech_recognition as sr
-from src.models.transcription import Transcription
-from src.utils.validators import validate_file_exists, ValidationError
+import whisper
+import tempfile
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models.transcription import Transcription
+from utils.validators import validate_file_exists, ValidationError
 
 
 class TranscriberError(Exception):
@@ -16,44 +21,42 @@ class TranscriberError(Exception):
 
 class Transcriber:
     """
-    Service for converting audio files to text transcriptions using speech recognition.
+    Service for converting audio files to text transcriptions using OpenAI Whisper.
     
-    This service uses the SpeechRecognition library with Google Speech Recognition
-    as the default engine for converting audio to text.
+    This service uses OpenAI's Whisper model for high-quality speech recognition
+    supporting multiple languages and audio formats.
     """
     
-    def __init__(self, language: str = "en-US"):
+    def __init__(self, model_name: str = "turbo", language: str = None):
         """
         Initialize the Transcriber service.
         
         Args:
-            language: Language code for speech recognition (default: "en-US")
+            model_name: Whisper model to use (tiny, base, small, medium, large, turbo)
+            language: Language code for speech recognition (None for auto-detection)
         """
+        self.model_name = model_name
         self.language = language
-        self.recognizer = sr.Recognizer()
+        self.model = None
         
-        # Configure recognizer settings for better accuracy
-        self.recognizer.energy_threshold = 4000
-        self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = 0.8
-        self.recognizer.phrase_threshold = 0.3
-        self.recognizer.non_speaking_duration = 0.8
+    def _load_model(self):
+        """Load the Whisper model if not already loaded."""
+        if self.model is None:
+            print(f"[WHISPER] Loading {self.model_name} model...")
+            self.model = whisper.load_model(self.model_name)
     
     def set_language(self, language: str) -> None:
         """
         Set the language for speech recognition.
         
         Args:
-            language: Language code (e.g., "en-US", "es-ES", "fr-FR")
+            language: Language code (e.g., "en", "es", "fr") or None for auto-detection
         """
-        if not language or not isinstance(language, str):
-            raise TranscriberError("Language must be a non-empty string")
-        
         self.language = language
     
     def transcribe(self, audio_path: str) -> str:
         """
-        Convert audio file to text transcription.
+        Convert audio file to text transcription using Whisper.
         
         Args:
             audio_path: Path to the audio file to transcribe
@@ -71,44 +74,39 @@ class Transcriber:
         except ValidationError as e:
             raise TranscriberError(f"Audio file validation failed: {str(e)}")
         
-        # Check file extension
-        supported_formats = ['.wav', '.flac', '.aiff', '.aif']
-        file_extension = os.path.splitext(audio_path)[1].lower()
-        
-        if file_extension not in supported_formats:
-            raise TranscriberError(
-                f"Unsupported audio format: {file_extension}. "
-                f"Supported formats: {', '.join(supported_formats)}"
-            )
-        
         try:
-            # Load audio file
-            with sr.AudioFile(audio_path) as source:
-                # Adjust for ambient noise
-                self.recognizer.adjust_for_ambient_noise(source, duration=1)
-                
-                # Record the audio data
-                audio_data = self.recognizer.record(source)
+            # Load Whisper model
+            self._load_model()
             
-            # Perform speech recognition
-            try:
-                text = self.recognizer.recognize_google(audio_data, language=self.language)
-                
-                if not text or text.strip() == "":
-                    raise TranscriberError("No speech detected in audio file")
-                
-                return text
-                
-            except sr.UnknownValueError:
-                raise TranscriberError("Could not understand audio - speech may be unclear or inaudible")
-            except sr.RequestError as e:
-                raise TranscriberError(f"Speech recognition service error: {str(e)}")
+            # Transcribe audio using Whisper
+            print(f"[WHISPER] Transcribing audio: {os.path.basename(audio_path)}")
+            
+            # Prepare transcription options
+            options = {
+                'verbose': False,
+                'fp16': False,  # Use fp32 for better compatibility
+            }
+            
+            if self.language:
+                options['language'] = self.language
+            
+            # Perform transcription
+            result = self.model.transcribe(audio_path, **options)
+            
+            # Extract text from result
+            text = result['text'].strip()
+            
+            if not text:
+                raise TranscriberError("No speech detected in audio file")
+            
+            print(f"[WHISPER] Transcription completed: {len(text.split())} words")
+            return text
                 
         except Exception as e:
             if isinstance(e, TranscriberError):
                 raise
             else:
-                raise TranscriberError(f"Failed to process audio file: {str(e)}")
+                raise TranscriberError(f"Failed to transcribe audio: {str(e)}")
     
     def transcribe_to_model(self, audio_path: str) -> Transcription:
         """
@@ -124,18 +122,54 @@ class Transcriber:
             TranscriberError: If transcription fails
         """
         try:
-            # Get transcribed text
-            text = self.transcribe(audio_path)
+            # Load Whisper model
+            self._load_model()
             
-            # For now, we'll use a default confidence score
-            # In a real implementation, this might come from the recognition engine
-            confidence = 0.85
+            # Transcribe with full results
+            print(f"[WHISPER] Transcribing audio with metadata: {os.path.basename(audio_path)}")
+            
+            # Prepare transcription options
+            options = {
+                'verbose': False,
+                'fp16': False,
+            }
+            
+            if self.language:
+                options['language'] = self.language
+            
+            # Perform transcription
+            result = self.model.transcribe(audio_path, **options)
+            
+            # Extract information from result
+            text = result['text'].strip()
+            detected_language = result.get('language', self.language or 'unknown')
+            
+            if not text:
+                raise TranscriberError("No speech detected in audio file")
+            
+            # Whisper doesn't provide a direct confidence score, but we can estimate
+            # based on the average log probability of segments if available
+            confidence = 0.90  # Whisper is generally very accurate
+            
+            if 'segments' in result and result['segments']:
+                # Calculate average confidence from segments if available
+                segment_probs = []
+                for segment in result['segments']:
+                    if 'avg_logprob' in segment:
+                        # Convert log probability to confidence (rough approximation)
+                        prob = min(1.0, max(0.0, (segment['avg_logprob'] + 3) / 3))
+                        segment_probs.append(prob)
+                
+                if segment_probs:
+                    confidence = sum(segment_probs) / len(segment_probs)
+            
+            print(f"[WHISPER] Transcription completed: {len(text.split())} words, language: {detected_language}")
             
             # Create and return Transcription object
             return Transcription(
                 text=text,
                 confidence=confidence,
-                language=self.language
+                language=detected_language
             )
             
         except Exception as e:
@@ -149,41 +183,37 @@ class Transcriber:
         Get list of supported audio formats.
         
         Returns:
-            List of supported file extensions
+            List of supported file extensions (Whisper supports many formats)
         """
-        return ['.wav', '.flac', '.aiff', '.aif']
+        return ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac', '.aiff', '.wma']
     
     def get_current_language(self) -> str:
         """
         Get the current language setting.
         
         Returns:
-            Current language code
+            Current language code or None for auto-detection
         """
         return self.language
     
-    def configure_recognizer(self, **kwargs) -> None:
+    def get_model_name(self) -> str:
         """
-        Configure speech recognizer settings.
+        Get the current Whisper model name.
+        
+        Returns:
+            Current model name
+        """
+        return self.model_name
+    
+    def set_model(self, model_name: str) -> None:
+        """
+        Set the Whisper model to use.
         
         Args:
-            **kwargs: Recognizer configuration parameters
-                - energy_threshold: Minimum energy level for speech detection
-                - pause_threshold: Seconds of pause to consider end of phrase
-                - phrase_threshold: Minimum length of phrase to consider
-                - dynamic_energy_threshold: Enable automatic threshold adjustment
+            model_name: Name of the Whisper model (tiny, base, small, medium, large, turbo)
         """
-        if 'energy_threshold' in kwargs:
-            self.recognizer.energy_threshold = kwargs['energy_threshold']
+        if model_name not in whisper.available_models():
+            raise TranscriberError(f"Invalid model name: {model_name}. Available: {whisper.available_models()}")
         
-        if 'pause_threshold' in kwargs:
-            self.recognizer.pause_threshold = kwargs['pause_threshold']
-        
-        if 'phrase_threshold' in kwargs:
-            self.recognizer.phrase_threshold = kwargs['phrase_threshold']
-        
-        if 'dynamic_energy_threshold' in kwargs:
-            self.recognizer.dynamic_energy_threshold = kwargs['dynamic_energy_threshold']
-        
-        if 'non_speaking_duration' in kwargs:
-            self.recognizer.non_speaking_duration = kwargs['non_speaking_duration']
+        self.model_name = model_name
+        self.model = None  # Force reload on next transcription

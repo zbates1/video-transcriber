@@ -1,11 +1,15 @@
 """Summarizer service for generating AI summaries using ChatGPT API."""
 
 import json
+import os
+import sys
 import requests
 from typing import Optional
 
-from src.models.summary import Summary
-from src.utils.config import get_config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models.summary import Summary
+from utils.config import get_config
 
 
 class Summarizer:

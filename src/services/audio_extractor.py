@@ -6,8 +6,12 @@ import tempfile
 from typing import Optional, List
 from pathlib import Path
 
-from ..utils.config import get_config
-from ..utils.file_handler import FileHandler
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.config import get_config
+from utils.file_handler import FileHandler
 
 
 class AudioExtractor:
@@ -38,6 +42,21 @@ class AudioExtractor:
             return None
             
         try:
+            # Check if ffmpeg is available
+            if not self.is_ffmpeg_available():
+                raise RuntimeError(
+                    "ffmpeg is not installed or not available in PATH.\n"
+                    "\nTo install ffmpeg:\n"
+                    "1. Download from: https://ffmpeg.org/download.html\n"
+                    "2. Extract to a folder (e.g., C:\\ffmpeg)\n"
+                    "3. Add ffmpeg\\bin to your PATH:\n"
+                    "   - Open System Properties > Environment Variables\n"
+                    "   - Edit 'Path' in System Variables\n"
+                    "   - Add: C:\\ffmpeg\\bin\n"
+                    "   - Restart your command prompt\n"
+                    "\nAlternatively, use: winget install ffmpeg"
+                )
+            
             # Generate output audio file path
             video_filename = FileHandler.get_filename_without_extension(video_path)
             audio_filename = f"{video_filename}_audio.wav"
@@ -71,15 +90,21 @@ class AudioExtractor:
                 self._temp_files.append(audio_path)
                 return audio_path
             else:
-                # Log error for debugging (in a real application, use proper logging)
-                return None
+                # Provide detailed error information
+                error_msg = f"ffmpeg failed with return code {result.returncode}"
+                if result.stderr:
+                    error_msg += f". Error: {result.stderr.strip()}"
+                raise RuntimeError(error_msg)
                 
+        except RuntimeError:
+            # Re-raise RuntimeError with meaningful message
+            raise
         except subprocess.TimeoutExpired:
-            return None
-        except subprocess.SubprocessError:
-            return None
-        except (OSError, ValueError):
-            return None
+            raise RuntimeError("Audio extraction timed out (file too large or processing too slow)")
+        except subprocess.SubprocessError as e:
+            raise RuntimeError(f"Subprocess error during audio extraction: {str(e)}")
+        except (OSError, ValueError) as e:
+            raise RuntimeError(f"System error during audio extraction: {str(e)}")
     
     def cleanup_temp_files(self) -> None:
         """Clean up all temporary audio files created by this instance."""

@@ -39,13 +39,13 @@ def validate_video_format(file_path: str, allowed_formats: Optional[List[str]] =
     
     Args:
         file_path: Path to the video file
-        allowed_formats: List of allowed file extensions (default: ['.mp4'])
+        allowed_formats: List of allowed file extensions (default: common video formats)
         
     Raises:
         ValidationError: If file format is not supported
     """
     if allowed_formats is None:
-        allowed_formats = ['.mp4']
+        allowed_formats = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm']
     
     file_extension = Path(file_path).suffix.lower()
     
@@ -62,7 +62,7 @@ def validate_video_file(file_path: str, allowed_formats: Optional[List[str]] = N
     
     Args:
         file_path: Path to the video file
-        allowed_formats: List of allowed file extensions (default: ['.mp4'])
+        allowed_formats: List of allowed file extensions (default: common video formats)
         
     Returns:
         Tuple of (is_valid, error_message)

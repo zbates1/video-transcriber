@@ -8,19 +8,11 @@ import os
 import sys
 from unittest.mock import patch, MagicMock, mock_open
 
-# Mock speech_recognition module since it may not be installed yet
-class MockUnknownValueError(Exception):
-    pass
-
-class MockRequestError(Exception):
-    pass
-
-mock_sr = MagicMock()
-mock_sr.Recognizer = MagicMock
-mock_sr.AudioFile = MagicMock
-mock_sr.UnknownValueError = MockUnknownValueError
-mock_sr.RequestError = MockRequestError
-sys.modules['speech_recognition'] = mock_sr
+# Mock whisper module for testing
+mock_whisper = MagicMock()
+mock_whisper.available_models = MagicMock(return_value=['tiny', 'base', 'small', 'medium', 'large', 'turbo'])
+mock_whisper.load_model = MagicMock()
+sys.modules['whisper'] = mock_whisper
 
 from src.services.transcriber import Transcriber, TranscriberError
 from src.models.transcription import Transcription
@@ -38,10 +30,10 @@ class TestTranscriber(unittest.TestCase):
         # Create test audio file paths
         self.valid_wav_file = os.path.join(self.temp_dir, "test_audio.wav")
         self.valid_flac_file = os.path.join(self.temp_dir, "test_audio.flac")
-        self.invalid_format_file = os.path.join(self.temp_dir, "test_audio.mp3")
+        self.valid_mp3_file = os.path.join(self.temp_dir, "test_audio.mp3")
         
         # Create dummy files
-        for file_path in [self.valid_wav_file, self.valid_flac_file, self.invalid_format_file]:
+        for file_path in [self.valid_wav_file, self.valid_flac_file, self.valid_mp3_file]:
             with open(file_path, 'wb') as f:
                 f.write(b"dummy audio content for testing")
     
@@ -54,68 +46,55 @@ class TestTranscriber(unittest.TestCase):
         """Test Transcriber initialization."""
         # Test default initialization
         transcriber = Transcriber()
-        self.assertEqual(transcriber.language, "en-US")
-        self.assertIsNotNone(transcriber.recognizer)
+        self.assertEqual(transcriber.model_name, "turbo")
+        self.assertIsNone(transcriber.language)
+        self.assertIsNone(transcriber.model)  # Model not loaded yet
         
-        # Test initialization with custom language
-        transcriber_custom = Transcriber(language="es-ES")
-        self.assertEqual(transcriber_custom.language, "es-ES")
+        # Test initialization with custom parameters
+        transcriber_custom = Transcriber(model_name="base", language="es")
+        self.assertEqual(transcriber_custom.model_name, "base")
+        self.assertEqual(transcriber_custom.language, "es")
     
     def test_set_language(self):
         """Test setting language."""
         # Test valid language
-        self.transcriber.set_language("fr-FR")
-        self.assertEqual(self.transcriber.language, "fr-FR")
+        self.transcriber.set_language("fr")
+        self.assertEqual(self.transcriber.language, "fr")
         
-        # Test empty language
-        with self.assertRaises(TranscriberError) as context:
-            self.transcriber.set_language("")
-        self.assertIn("Language must be a non-empty string", str(context.exception))
+        # Test None language (auto-detection)
+        self.transcriber.set_language(None)
+        self.assertIsNone(self.transcriber.language)
         
-        # Test None language
-        with self.assertRaises(TranscriberError) as context:
-            self.transcriber.set_language(None)
-        self.assertIn("Language must be a non-empty string", str(context.exception))
-        
-        # Test non-string language
-        with self.assertRaises(TranscriberError) as context:
-            self.transcriber.set_language(123)
-        self.assertIn("Language must be a non-empty string", str(context.exception))
+        # Test empty string (should work as None)
+        self.transcriber.set_language("")
+        self.assertEqual(self.transcriber.language, "")
     
     def test_get_current_language(self):
         """Test getting current language."""
-        self.assertEqual(self.transcriber.get_current_language(), "en-US")
+        self.assertIsNone(self.transcriber.get_current_language())  # Default is None (auto-detect)
         
-        self.transcriber.set_language("de-DE")
-        self.assertEqual(self.transcriber.get_current_language(), "de-DE")
+        self.transcriber.set_language("de")
+        self.assertEqual(self.transcriber.get_current_language(), "de")
     
     def test_get_supported_formats(self):
         """Test getting supported audio formats."""
         formats = self.transcriber.get_supported_formats()
-        expected_formats = ['.wav', '.flac', '.aiff', '.aif']
+        expected_formats = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac', '.aiff', '.wma']
         
         self.assertEqual(formats, expected_formats)
         self.assertIsInstance(formats, list)
     
-    def test_configure_recognizer(self):
-        """Test configuring speech recognizer settings."""
-        # Test setting energy threshold
-        self.transcriber.configure_recognizer(energy_threshold=5000)
-        self.assertEqual(self.transcriber.recognizer.energy_threshold, 5000)
+    def test_set_model(self):
+        """Test setting Whisper model."""
+        # Test valid model
+        self.transcriber.set_model("base")
+        self.assertEqual(self.transcriber.model_name, "base")
+        self.assertIsNone(self.transcriber.model)  # Should reset model
         
-        # Test setting pause threshold
-        self.transcriber.configure_recognizer(pause_threshold=1.0)
-        self.assertEqual(self.transcriber.recognizer.pause_threshold, 1.0)
-        
-        # Test setting multiple parameters
-        self.transcriber.configure_recognizer(
-            energy_threshold=3000,
-            dynamic_energy_threshold=False,
-            phrase_threshold=0.5
-        )
-        self.assertEqual(self.transcriber.recognizer.energy_threshold, 3000)
-        self.assertFalse(self.transcriber.recognizer.dynamic_energy_threshold)
-        self.assertEqual(self.transcriber.recognizer.phrase_threshold, 0.5)
+        # Test invalid model
+        with self.assertRaises(TranscriberError) as context:
+            self.transcriber.set_model("invalid_model")
+        self.assertIn("Invalid model name", str(context.exception))
     
     @patch('src.services.transcriber.validate_file_exists')
     def test_transcribe_validation_error(self, mock_validate):
@@ -128,57 +107,46 @@ class TestTranscriber(unittest.TestCase):
         self.assertIn("Audio file validation failed", str(context.exception))
         self.assertIn("File does not exist", str(context.exception))
     
-    def test_transcribe_unsupported_format(self):
-        """Test transcribe method with unsupported audio format."""
-        with self.assertRaises(TranscriberError) as context:
-            self.transcriber.transcribe(self.invalid_format_file)
+    def test_get_model_name(self):
+        """Test getting model name."""
+        self.assertEqual(self.transcriber.get_model_name(), "turbo")
         
-        self.assertIn("Unsupported audio format: .mp3", str(context.exception))
-        self.assertIn("Supported formats:", str(context.exception))
+        self.transcriber.set_model("base")
+        self.assertEqual(self.transcriber.get_model_name(), "base")
     
-    @patch('src.services.transcriber.sr.AudioFile')
     @patch('src.services.transcriber.validate_file_exists')
-    def test_transcribe_success(self, mock_validate, mock_audio_file):
-        """Test successful transcription."""
+    def test_transcribe_success(self, mock_validate):
+        """Test successful transcription with Whisper."""
         # Setup mocks
         mock_validate.return_value = None
         
-        mock_source = MagicMock()
-        mock_audio_file.return_value.__enter__ = MagicMock(return_value=mock_source)
-        mock_audio_file.return_value.__exit__ = MagicMock(return_value=None)
-        
-        mock_audio_data = MagicMock()
-        self.transcriber.recognizer.record = MagicMock(return_value=mock_audio_data)
-        self.transcriber.recognizer.adjust_for_ambient_noise = MagicMock()
-        self.transcriber.recognizer.recognize_google = MagicMock(return_value="Hello world")
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {
+            'text': 'Hello world',
+            'language': 'en'
+        }
+        mock_whisper.load_model.return_value = mock_model
         
         # Test transcription
         result = self.transcriber.transcribe(self.valid_wav_file)
         
         self.assertEqual(result, "Hello world")
         mock_validate.assert_called_once_with(self.valid_wav_file)
-        mock_audio_file.assert_called_once_with(self.valid_wav_file)
-        self.transcriber.recognizer.adjust_for_ambient_noise.assert_called_once()
-        self.transcriber.recognizer.record.assert_called_once_with(mock_source)
-        self.transcriber.recognizer.recognize_google.assert_called_once_with(
-            mock_audio_data, language="en-US"
-        )
+        mock_whisper.load_model.assert_called_once_with("turbo")
+        mock_model.transcribe.assert_called_once()
     
-    @patch('src.services.transcriber.sr.AudioFile')
     @patch('src.services.transcriber.validate_file_exists')
-    def test_transcribe_no_speech_detected(self, mock_validate, mock_audio_file):
+    def test_transcribe_no_speech_detected(self, mock_validate):
         """Test transcription when no speech is detected."""
         # Setup mocks
         mock_validate.return_value = None
         
-        mock_source = MagicMock()
-        mock_audio_file.return_value.__enter__ = MagicMock(return_value=mock_source)
-        mock_audio_file.return_value.__exit__ = MagicMock(return_value=None)
-        
-        mock_audio_data = MagicMock()
-        self.transcriber.recognizer.record = MagicMock(return_value=mock_audio_data)
-        self.transcriber.recognizer.adjust_for_ambient_noise = MagicMock()
-        self.transcriber.recognizer.recognize_google = MagicMock(return_value="")
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {
+            'text': '  ',  # Empty/whitespace text
+            'language': 'en'
+        }
+        mock_whisper.load_model.return_value = mock_model
         
         # Test transcription with empty result
         with self.assertRaises(TranscriberError) as context:
@@ -186,97 +154,102 @@ class TestTranscriber(unittest.TestCase):
         
         self.assertIn("No speech detected in audio file", str(context.exception))
     
-    @patch('src.services.transcriber.sr.AudioFile')
     @patch('src.services.transcriber.validate_file_exists')
-    def test_transcribe_unknown_value_error(self, mock_validate, mock_audio_file):
-        """Test transcription with UnknownValueError."""
+    def test_transcribe_whisper_error(self, mock_validate):
+        """Test transcription with Whisper error."""
         # Setup mocks
         mock_validate.return_value = None
         
-        mock_source = MagicMock()
-        mock_audio_file.return_value.__enter__ = MagicMock(return_value=mock_source)
-        mock_audio_file.return_value.__exit__ = MagicMock(return_value=None)
+        mock_model = MagicMock()
+        mock_model.transcribe.side_effect = Exception("Whisper processing error")
+        mock_whisper.load_model.return_value = mock_model
         
-        mock_audio_data = MagicMock()
-        self.transcriber.recognizer.record = MagicMock(return_value=mock_audio_data)
-        self.transcriber.recognizer.adjust_for_ambient_noise = MagicMock()
-        self.transcriber.recognizer.recognize_google = MagicMock(
-            side_effect=mock_sr.UnknownValueError()
-        )
-        
-        # Test transcription with unclear audio
+        # Test transcription with Whisper error
         with self.assertRaises(TranscriberError) as context:
             self.transcriber.transcribe(self.valid_wav_file)
         
-        self.assertIn("Could not understand audio", str(context.exception))
+        self.assertIn("Failed to transcribe audio", str(context.exception))
+        self.assertIn("Whisper processing error", str(context.exception))
     
-    @patch('src.services.transcriber.sr.AudioFile')
     @patch('src.services.transcriber.validate_file_exists')
-    def test_transcribe_request_error(self, mock_validate, mock_audio_file):
-        """Test transcription with RequestError."""
+    def test_load_model(self, mock_validate):
+        """Test model loading."""
         # Setup mocks
         mock_validate.return_value = None
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {
+            'text': 'Test transcription',
+            'language': 'en'
+        }
+        mock_whisper.load_model.return_value = mock_model
         
-        mock_source = MagicMock()
-        mock_audio_file.return_value.__enter__ = MagicMock(return_value=mock_source)
-        mock_audio_file.return_value.__exit__ = MagicMock(return_value=None)
+        # First call should load the model
+        result = self.transcriber.transcribe(self.valid_wav_file)
+        self.assertEqual(result, "Test transcription")
+        self.assertIsNotNone(self.transcriber.model)
         
-        mock_audio_data = MagicMock()
-        self.transcriber.recognizer.record = MagicMock(return_value=mock_audio_data)
-        self.transcriber.recognizer.adjust_for_ambient_noise = MagicMock()
-        self.transcriber.recognizer.recognize_google = MagicMock(
-            side_effect=mock_sr.RequestError("Network error")
-        )
-        
-        # Test transcription with network error
-        with self.assertRaises(TranscriberError) as context:
-            self.transcriber.transcribe(self.valid_wav_file)
-        
-        self.assertIn("Speech recognition service error", str(context.exception))
-        self.assertIn("Network error", str(context.exception))
+        # Second call should reuse the model
+        mock_whisper.load_model.reset_mock()
+        result2 = self.transcriber.transcribe(self.valid_wav_file)
+        mock_whisper.load_model.assert_not_called()  # Should not load again
     
-    @patch('src.services.transcriber.sr.AudioFile')
     @patch('src.services.transcriber.validate_file_exists')
-    def test_transcribe_generic_error(self, mock_validate, mock_audio_file):
+    def test_transcribe_generic_error(self, mock_validate):
         """Test transcription with generic error."""
-        # Setup mocks
-        mock_validate.return_value = None
-        mock_audio_file.side_effect = IOError("File read error")
+        # Setup validation error
+        mock_validate.side_effect = ValidationError("File does not exist")
         
-        # Test transcription with file read error
+        # Test transcription with validation error
         with self.assertRaises(TranscriberError) as context:
             self.transcriber.transcribe(self.valid_wav_file)
         
-        self.assertIn("Failed to process audio file", str(context.exception))
-        self.assertIn("File read error", str(context.exception))
+        self.assertIn("Audio file validation failed", str(context.exception))
+        self.assertIn("File does not exist", str(context.exception))
     
-    @patch.object(Transcriber, 'transcribe')
-    def test_transcribe_to_model_success(self, mock_transcribe):
+    @patch('src.services.transcriber.validate_file_exists')
+    def test_transcribe_to_model_success(self, mock_validate):
         """Test successful transcription to model."""
-        mock_transcribe.return_value = "Hello world test transcription"
+        # Setup mocks
+        mock_validate.return_value = None
+        
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {
+            'text': 'Hello world test transcription',
+            'language': 'en',
+            'segments': [{
+                'avg_logprob': -0.5
+            }]
+        }
+        mock_whisper.load_model.return_value = mock_model
         
         result = self.transcriber.transcribe_to_model(self.valid_wav_file)
         
         self.assertIsInstance(result, Transcription)
         self.assertEqual(result.text, "Hello world test transcription")
-        self.assertEqual(result.confidence, 0.85)
-        self.assertEqual(result.language, "en-US")
-        mock_transcribe.assert_called_once_with(self.valid_wav_file)
+        self.assertEqual(result.language, "en")
+        self.assertGreater(result.confidence, 0)  # Should have calculated confidence
     
-    @patch.object(Transcriber, 'transcribe')
-    def test_transcribe_to_model_error(self, mock_transcribe):
+    @patch('src.services.transcriber.validate_file_exists')
+    def test_transcribe_to_model_error(self, mock_validate):
         """Test transcription to model with error."""
-        mock_transcribe.side_effect = TranscriberError("Transcription failed")
+        # Setup validation error
+        mock_validate.side_effect = ValidationError("File validation failed")
         
         with self.assertRaises(TranscriberError) as context:
             self.transcriber.transcribe_to_model(self.valid_wav_file)
         
-        self.assertIn("Transcription failed", str(context.exception))
+        self.assertIn("Audio file validation failed", str(context.exception))
+        self.assertIn("File validation failed", str(context.exception))
     
-    @patch.object(Transcriber, 'transcribe')
-    def test_transcribe_to_model_generic_error(self, mock_transcribe):
+    @patch('src.services.transcriber.validate_file_exists')
+    def test_transcribe_to_model_generic_error(self, mock_validate):
         """Test transcription to model with generic error."""
-        mock_transcribe.side_effect = ValueError("Some other error")
+        # Setup mocks
+        mock_validate.return_value = None
+        
+        mock_model = MagicMock()
+        mock_model.transcribe.side_effect = ValueError("Some other error")
+        mock_whisper.load_model.return_value = mock_model
         
         with self.assertRaises(TranscriberError) as context:
             self.transcriber.transcribe_to_model(self.valid_wav_file)
@@ -285,38 +258,25 @@ class TestTranscriber(unittest.TestCase):
         self.assertIn("Some other error", str(context.exception))
     
     def test_different_audio_formats(self):
-        """Test validation with different supported audio formats."""
+        """Test that Whisper supports many audio formats."""
         supported_files = [
-            ("test.wav", True),
-            ("test.flac", True),
-            ("test.aiff", True),
-            ("test.aif", True),
-            ("test.WAV", True),  # Case insensitive
-            ("test.FLAC", True),
-            ("test.mp3", False),  # Unsupported
-            ("test.m4a", False),  # Unsupported
-            ("test.ogg", False),  # Unsupported
+            "test.wav",
+            "test.mp3", 
+            "test.flac",
+            "test.m4a",
+            "test.ogg",
+            "test.opus",
+            "test.aac",
+            "test.aiff",
+            "test.wma"
         ]
         
-        for filename, should_be_valid in supported_files:
-            file_path = os.path.join(self.temp_dir, filename)
-            with open(file_path, 'wb') as f:
-                f.write(b"dummy content")
-            
-            with self.subTest(filename=filename):
-                if should_be_valid:
-                    # Should not raise exception for format validation
-                    # (but may raise other exceptions in actual transcription)
-                    try:
-                        self.transcriber.transcribe(file_path)
-                    except TranscriberError as e:
-                        # Only format errors should be tested here
-                        self.assertNotIn("Unsupported audio format", str(e))
-                else:
-                    # Should raise format error
-                    with self.assertRaises(TranscriberError) as context:
-                        self.transcriber.transcribe(file_path)
-                    self.assertIn("Unsupported audio format", str(context.exception))
+        formats = self.transcriber.get_supported_formats()
+        
+        for filename in supported_files:
+            extension = os.path.splitext(filename)[1]
+            with self.subTest(extension=extension):
+                self.assertIn(extension, formats, f"Format {extension} should be supported by Whisper")
     
     def test_transcriber_error_inheritance(self):
         """Test that TranscriberError is properly inherited from Exception."""

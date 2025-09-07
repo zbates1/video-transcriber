@@ -3,10 +3,8 @@
 # This file contains all necessary dependencies for the video transcription pipeline
 # Install with: pip install -r requirements.txt
 
-# Core speech recognition functionality
-SpeechRecognition>=3.10.0
-# Required for SpeechRecognition to work with various audio formats
-PyAudio>=0.2.11
+# Core speech recognition functionality - OpenAI Whisper
+openai-whisper>=20250625
 
 # HTTP requests for ChatGPT API integration
 requests>=2.31.0

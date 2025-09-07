@@ -14,13 +14,13 @@ from pathlib import Path
 # Add src directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.utils.validators import validate_video_file, validate_output_directory, validate_api_key, ValidationError
-from src.utils.config import Config
-from src.utils.file_handler import FileHandler
-from src.models.video_file import VideoFile
-from src.services.audio_extractor import AudioExtractor
-from src.services.transcriber import Transcriber
-from src.services.summarizer import Summarizer
+from utils.validators import validate_video_file, validate_output_directory, validate_api_key, ValidationError
+from utils.config import Config
+from utils.file_handler import FileHandler
+from models.video_file import VideoFile
+from services.audio_extractor import AudioExtractor
+from services.transcriber import Transcriber
+from services.summarizer import Summarizer
 
 
 class VideoTranscriberCLI:
@@ -49,7 +49,7 @@ class VideoTranscriberCLI:
         """
         try:
             # Step 1: Validate inputs
-            print(f"🎥 Processing video: {video_path}")
+            print(f"[VIDEO] Processing video: {video_path}")
             
             # Validate video file
             is_valid, error_msg = validate_video_file(video_path)
@@ -63,27 +63,27 @@ class VideoTranscriberCLI:
             video_file = VideoFile(video_path)
             video_file.validate()
             
-            print(f"✅ Video file validated: {video_file.filename}")
+            print(f"[OK] Video file validated: {video_file.filename}")
             
             # Step 2: Extract audio from video
-            print("🎵 Extracting audio from video...")
+            print("[AUDIO] Extracting audio from video...")
             try:
                 audio_path = self.audio_extractor.extract_audio(video_path)
-                print(f"✅ Audio extracted: {audio_path}")
+                print(f"[OK] Audio extracted: {audio_path}")
             except Exception as e:
                 raise RuntimeError(f"Audio extraction failed: {str(e)}")
             
             # Step 3: Transcribe audio to text
-            print("📝 Transcribing audio to text...")
+            print("[TRANSCRIBE] Transcribing audio to text...")
             try:
                 transcription = self.transcriber.transcribe_to_model(audio_path)
-                print(f"✅ Transcription completed: {transcription.get_word_count()} words")
+                print(f"[OK] Transcription completed: {transcription.get_word_count()} words")
                 
                 # Save transcription
                 base_name = Path(video_file.filename).stem
                 transcription_path = os.path.join(output_dir, f"{base_name}_transcription.txt")
                 transcription.save_to_file(transcription_path)
-                print(f"💾 Transcription saved: {transcription_path}")
+                print(f"[SAVE] Transcription saved: {transcription_path}")
                 
             except Exception as e:
                 raise RuntimeError(f"Transcription failed: {str(e)}")
@@ -92,9 +92,9 @@ class VideoTranscriberCLI:
                 # Clean up temporary audio file
                 try:
                     self.audio_extractor.cleanup_temp_files()
-                    print("🧹 Temporary audio files cleaned up")
+                    print("[CLEANUP] Temporary audio files cleaned up")
                 except Exception as e:
-                    print(f"⚠️ Warning: Failed to clean up temporary files: {str(e)}")
+                    print(f"[WARNING] Failed to clean up temporary files: {str(e)}")
             
             # Step 4: Generate AI summary (if API key provided)
             summary_path = None
@@ -102,24 +102,24 @@ class VideoTranscriberCLI:
                 try:
                     validate_api_key(api_key)
                     
-                    print("🤖 Generating AI summary...")
+                    print("[AI] Generating AI summary...")
                     summary_text = self.summarizer.generate_summary(transcription.text, api_key)
                     if summary_text:
                         summary = self.summarizer.create_summary_object(transcription.text, summary_text)
-                        print(f"✅ Summary generated: {summary.get_compression_ratio():.1%} compression")
+                        print(f"[OK] Summary generated: {summary.get_compression_ratio():.1%} compression")
                     else:
                         raise RuntimeError("Summary generation returned empty result")
                     
                     # Save summary
                     summary_path = os.path.join(output_dir, f"{base_name}_summary.txt")
                     summary.save_to_file(summary_path)
-                    print(f"💾 Summary saved: {summary_path}")
+                    print(f"[SAVE] Summary saved: {summary_path}")
                     
                 except Exception as e:
-                    print(f"⚠️ Warning: Summary generation failed: {str(e)}")
-                    print("📝 Continuing with transcription only...")
+                    print(f"[WARNING] Summary generation failed: {str(e)}")
+                    print("[INFO] Continuing with transcription only...")
             else:
-                print("ℹ️ No API key provided. Skipping summary generation.")
+                print("[INFO] No API key provided. Skipping summary generation.")
                 print("  Use --api-key option or set OPENAI_API_KEY environment variable.")
             
             # Step 5: Return results
@@ -133,16 +133,16 @@ class VideoTranscriberCLI:
                 "success": True
             }
             
-            print(f"\n🎉 Pipeline completed successfully!")
-            print(f"📁 Output directory: {output_dir}")
-            print(f"📄 Transcription: {transcription_path}")
+            print(f"\n[SUCCESS] Pipeline completed successfully!")
+            print(f"[OUTPUT] Output directory: {output_dir}")
+            print(f"[FILE] Transcription: {transcription_path}")
             if summary_path:
-                print(f"📄 Summary: {summary_path}")
+                print(f"[FILE] Summary: {summary_path}")
             
             return results
             
         except Exception as e:
-            print(f"\n❌ Pipeline failed: {str(e)}")
+            print(f"\n[ERROR] Pipeline failed: {str(e)}")
             return {
                 "video_file": video_path,
                 "error": str(e),
@@ -182,8 +182,8 @@ Examples:
         
         parser.add_argument(
             "--language", "-l",
-            default="en-US",
-            help="Language for speech recognition (default: en-US)"
+            default=None,
+            help="Language for speech recognition (e.g., 'en', 'es', 'fr', default: auto-detect)"
         )
         
         parser.add_argument(
@@ -203,8 +203,12 @@ def main():
     # Get API key from argument or environment
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
     
-    # Set transcriber language
-    cli.transcriber.set_language(args.language)
+    # Set transcriber language (convert from old format if needed)
+    language = args.language
+    if language and '-' in language:
+        # Convert from en-US format to en format for Whisper
+        language = language.split('-')[0]
+    cli.transcriber.set_language(language)
     
     # Run pipeline
     results = cli.run(
