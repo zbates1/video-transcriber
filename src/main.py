@@ -35,7 +35,7 @@ class VideoTranscriberCLI:
         self.transcriber = Transcriber()
         self.summarizer = Summarizer()
     
-    def run(self, video_path: str, output_dir: str = "output", api_key: str = None) -> dict:
+    def run(self, video_path: str, output_dir: str = "output", api_key: str = None, output_format: str = "default") -> dict:
         """
         Run the complete video transcription pipeline.
         
@@ -101,8 +101,9 @@ class VideoTranscriberCLI:
             if api_key:
                 try:
                     validate_api_key(api_key)
-                    
-                    print("[AI] Generating AI summary...")
+
+                    print(f"[AI] Generating AI summary (format: {output_format})...")
+                    self.summarizer.set_output_format(output_format)
                     summary_text = self.summarizer.generate_summary(transcription.text, api_key)
                     if summary_text:
                         summary = self.summarizer.create_summary_object(transcription.text, summary_text)
@@ -191,7 +192,14 @@ Examples:
             action="store_true",
             help="Enable verbose output"
         )
-        
+
+        parser.add_argument(
+            "--format", "-f",
+            default="default",
+            choices=["default", "cmu-bme-seminar"],
+            help="Output format for summary (default: default)"
+        )
+
         return parser.parse_args()
 
 
@@ -214,7 +222,8 @@ def main():
     results = cli.run(
         video_path=args.video_path,
         output_dir=args.output_dir,
-        api_key=api_key
+        api_key=api_key,
+        output_format=args.format
     )
     
     # Exit with appropriate code

@@ -1,0 +1,16 @@
+name: video_transcriber
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy<2.3
+  - pip
+  - pip:
+    - openai-whisper>=20250625
+    - requests>=2.31.0
+    - python-dotenv>=1.0.0
+    - pydub>=0.25.1
+    - pytest>=7.4.0
+    - pytest-cov>=4.1.0
+    - pytest-mock>=3.11.0
