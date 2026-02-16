@@ -1,6 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Store script directory immediately before anything else
+set SCRIPT_DIR=%~dp0
+
 echo ============================================
 echo  Video Transcriber - Setup and Run
 echo ============================================
@@ -198,10 +201,10 @@ if %errorlevel% neq 0 (
 )
 
 :: Change to script directory
-cd /d "%~dp0"
+cd /d "%SCRIPT_DIR%"
 
-:: Run the transcriber with format option
-python src/main.py "%VIDEO_PATH%" --output-dir "%OUTPUT_DIR%" --format "%FORMAT%"
+:: Run the transcriber with format option (use absolute path)
+python "%SCRIPT_DIR%src\main.py" "%VIDEO_PATH%" --output-dir "%OUTPUT_DIR%" --format "%FORMAT%"
 
 :: Capture exit code
 set EXIT_CODE=%errorlevel%
